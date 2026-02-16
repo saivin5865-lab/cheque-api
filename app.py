@@ -1,45 +1,45 @@
-from fastapi import FastAPI, UploadFile, File
+%%writefile app.py
+from fastapi import FastAPI, File, UploadFile
 from ultralytics import YOLO
-from PIL import Image
-import easyocr
-import numpy as np
-import io
+import shutil
+import uuid
+import os
 
 app = FastAPI()
 
-# Load YOLO model
-model = YOLO("best.pt")
+# Load trained model once (important)
+model = YOLO("runs/detect/train/weights/best.pt")
 
-# Load EasyOCR
-reader = easyocr.Reader(['en'], gpu=False)
-
-@app.post("/predict/")
+@app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-    results = model(image)
+    # Save uploaded file temporarily
+    temp_filename = f"{uuid.uuid4()}.jpg"
 
-    extracted_data = {}
+    with open(temp_filename, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Run prediction
+    results = model.predict(temp_filename, conf=0.25)
+
+    detections = []
 
     for box in results[0].boxes:
-        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-        cls = int(box.cls)
-        field_name = model.names[cls]
+        cls_id = int(box.cls)
+        conf = float(box.conf)
+        class_name = model.names[cls_id]
+        coords = box.xyxy.tolist()[0]
 
-        # Crop detected field
-        cropped = image.crop((x1, y1, x2, y2))
+        detections.append({
+            "field": class_name,
+            "confidence": round(conf, 3),
+            "bbox": coords
+        })
 
-        # Convert to numpy for EasyOCR
-        cropped_np = np.array(cropped)
+    # Remove temp image
+    os.remove(temp_filename)
 
-        # Run OCR
-        ocr_result = reader.readtext(cropped_np)
-
-        text = ""
-        if len(ocr_result) > 0:
-            text = " ".join([res[1] for res in ocr_result])
-
-        extracted_data[field_name] = text.strip()
-
-    return extracted_data
+    return {
+        "status": "success",
+        "detections": detections
+    }

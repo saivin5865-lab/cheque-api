@@ -1,25 +1,25 @@
-%%writefile app.py
 from fastapi import FastAPI, File, UploadFile
 from ultralytics import YOLO
 import shutil
 import uuid
 import os
 
-app = FastAPI()
+app = FastAPI(title="Cheque Detection API")
 
-# Load trained model once (important)
-model = YOLO("runs/detect/train/weights/best.pt")
+model = YOLO("best.pt")
+
+@app.get("/")
+def home():
+    return {"message": "Cheque Detection API Running"}
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
 
-    # Save uploaded file temporarily
     temp_filename = f"{uuid.uuid4()}.jpg"
 
     with open(temp_filename, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Run prediction
     results = model.predict(temp_filename, conf=0.25)
 
     detections = []
@@ -36,7 +36,6 @@ async def predict(file: UploadFile = File(...)):
             "bbox": coords
         })
 
-    # Remove temp image
     os.remove(temp_filename)
 
     return {

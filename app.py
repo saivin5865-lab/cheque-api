@@ -1,30 +1,45 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, File, UploadFile
 from ultralytics import YOLO
-from PIL import Image
-import io
+import shutil
+import uuid
+import os
 
-app = FastAPI()
+app = FastAPI(title="Cheque Field Detection API")
 
-# Load YOLO model
-model = YOLO("best.pt")  # replace with your trained model path
+# Load model once at startup
+model = YOLO("best.pt")
 
-@app.post("/predict/")
+@app.get("/")
+def home():
+    return {"message": "Cheque Detection API Running"}
+
+@app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-    # Run YOLO prediction
-    results = model(image)
+    temp_filename = f"{uuid.uuid4()}.jpg"
 
-    # Extract bounding boxes
+    with open(temp_filename, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    results = model.predict(temp_filename, conf=0.25)
+
     detections = []
+
     for box in results[0].boxes:
-        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-        cls = int(box.cls)
-        label = model.names[cls]
+        cls_id = int(box.cls)
+        conf = float(box.conf)
+        class_name = model.names[cls_id]
+        coords = box.xyxy.tolist()[0]
+
         detections.append({
-            "label": label,
-            "bbox": [x1, y1, x2, y2]
+            "field": class_name,
+            "confidence": round(conf, 3),
+            "bbox": coords
         })
 
-    return {"detections": detections}
+    os.remove(temp_filename)
+
+    return {
+        "status": "success",
+        "detections": detections
+    }
